@@ -2,16 +2,60 @@ import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import test from "node:test";
 
-async function render() {
+const env = {
+  ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) },
+  DASHBOARD_PASSWORD: "test-password",
+  AUTH_SECRET: "test-secret-with-enough-entropy",
+};
+
+async function fetchWorker(request) {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
-  return worker.fetch(
-    new Request("http://localhost/", { headers: { accept: "text/html", host: "localhost" } }),
-    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
-    { waitUntil() {}, passThroughOnException() {} },
+  return worker.fetch(request, env, { waitUntil() {}, passThroughOnException() {} });
+}
+
+async function authenticatedCookie() {
+  const response = await fetchWorker(
+    new Request("https://localhost/login", {
+      method: "POST",
+      body: new URLSearchParams({ password: env.DASHBOARD_PASSWORD }),
+    }),
+  );
+  assert.equal(response.status, 303);
+  return response.headers.get("set-cookie").split(";")[0];
+}
+
+async function render() {
+  const cookie = await authenticatedCookie();
+  return fetchWorker(
+    new Request("https://localhost/", {
+      headers: { accept: "text/html", host: "localhost", cookie },
+    }),
   );
 }
+
+test("protects pages and data endpoints with a shared password", async () => {
+  const page = await fetchWorker(
+    new Request("https://localhost/", { headers: { accept: "text/html" } }),
+  );
+  assert.equal(page.status, 303);
+  assert.equal(page.headers.get("location"), "/login");
+
+  const data = await fetchWorker(
+    new Request("https://localhost/sea-sale.json", { headers: { accept: "application/json" } }),
+  );
+  assert.equal(data.status, 401);
+
+  const wrongPassword = await fetchWorker(
+    new Request("https://localhost/login", {
+      method: "POST",
+      body: new URLSearchParams({ password: "wrong" }),
+    }),
+  );
+  assert.equal(wrongPassword.status, 401);
+  assert.match(await wrongPassword.text(), /密码不正确/);
+});
 
 test("server-renders the SEA sales dashboard", async () => {
   const response = await render();
