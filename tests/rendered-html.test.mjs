@@ -1,0 +1,38 @@
+import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
+import test from "node:test";
+
+async function render() {
+  const workerUrl = new URL("../dist/server/index.js", import.meta.url);
+  workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
+  const { default: worker } = await import(workerUrl.href);
+  return worker.fetch(
+    new Request("http://localhost/", { headers: { accept: "text/html", host: "localhost" } }),
+    { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } },
+    { waitUntil() {}, passThroughOnException() {} },
+  );
+}
+
+test("server-renders the SEA sales dashboard", async () => {
+  const response = await render();
+  assert.equal(response.status, 200);
+  assert.match(response.headers.get("content-type") ?? "", /^text\/html\b/i);
+  const html = await response.text();
+  assert.match(html, /SEA 销售经营看板/);
+  assert.match(html, /东南亚销售/);
+  assert.match(html, /全渠道总览/);
+  assert.match(html, /TikTok、Shopee、Lazada/);
+  assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/);
+});
+
+test("ships a complete SEA-sale fallback snapshot", async () => {
+  const raw = await readFile(new URL("../public/sea-sale.json", import.meta.url), "utf8");
+  const payload = JSON.parse(raw);
+  assert.equal(payload.currency, "CNY");
+  assert.equal(payload.rows.length, 10843);
+  assert.equal(payload.rows.filter((row) => row.total > 0).at(-1).date, "2026-07-20");
+  assert.deepEqual(
+    [...new Set(payload.rows.map((row) => row.country))].sort(),
+    ["印尼", "新加坡", "泰国", "菲律宾", "越南", "马来"].sort(),
+  );
+});
