@@ -88,6 +88,10 @@ test("includes the meeting notes and automatic review modules", async () => {
   assert.match(source, /渠道趋势与补贴变化/);
   assert.match(source, /各品牌在不同国家的趋势/);
   assert.match(source, /各国家站点内品牌趋势/);
+  assert.match(source, /function ChannelTableMetric/);
+  assert.match(source, /ttYoy/);
+  assert.match(source, /spYoy/);
+  assert.match(source, /lzdMom/);
   assert.match(source, /type="date"/);
   assert.match(source, /type="month"/);
 });

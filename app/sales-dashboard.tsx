@@ -222,6 +222,17 @@ function MultiSelect({
   );
 }
 
+function ChannelTableMetric({ amount, mom, yoy }: { amount: number; mom: number; yoy?: number }) {
+  const trendClass = (value: number) => Number.isFinite(value) && value >= 0 ? "table-up" : "table-down";
+  return (
+    <div className="channel-table-metric">
+      <strong>{money(amount)}</strong>
+      <span><small>环比</small><b className={trendClass(mom)}>{deltaLabel(mom)}</b></span>
+      {yoy !== undefined && <span><small>同比</small><b className={trendClass(yoy)}>{deltaLabel(yoy)}</b></span>}
+    </div>
+  );
+}
+
 function KpiCard({
   eyebrow,
   value,
@@ -455,6 +466,11 @@ export function SalesDashboard() {
         lzdDelta: now.lzd - prev.lzd,
         ttSubsidyDelta: now.ttSubsidy - prev.ttSubsidy,
         spSubsidyDelta: now.spSubsidy - prev.spSubsidy,
+        ttMom: growth(now.tt, prev.tt),
+        ttYoy: growth(now.tt, lastYear.tt),
+        spMom: growth(now.sp, prev.sp),
+        spYoy: growth(now.sp, lastYear.sp),
+        lzdMom: growth(now.lzd, prev.lzd),
       };
     }).sort((a, b) => b.total - a.total);
   }, [rows, timeMode, selection, sharedCutoff, rangeEnd, selectedCountries, selectedBrands]);
@@ -674,7 +690,7 @@ export function SalesDashboard() {
           {view === "overview" && (
             <section className="content-card">
               <div className="section-heading"><div><span>01 / OVERVIEW</span><h2>国家 × 品牌全渠道销售</h2><p>{comparisonLabels.join("、")}，按全渠道金额排序</p></div><div className="mini-summary"><small>覆盖组合</small><strong>{matrix.length}</strong></div></div>
-              <div className="table-wrap"><table><thead><tr><th>国家 / 品牌</th><th>全渠道</th><th>环比</th><th>同比</th><th>TikTok</th><th>Shopee</th><th>Lazada</th><th>货架占比</th><th>TT补贴</th><th>SP补贴</th></tr></thead><tbody>{matrix.map((row) => <tr key={`${row.country}-${row.brand}`}><td><b>{row.brand}</b><span>{row.country}</span></td><td><strong>{money(row.total)}</strong></td><td><span className={Number.isFinite(row.mom) && row.mom >= 0 ? "table-up" : "table-down"}>{deltaLabel(row.mom)}</span></td><td><span className={Number.isFinite(row.yoy) && row.yoy >= 0 ? "table-up" : "table-down"}>{deltaLabel(row.yoy)}</span></td><td>{money(row.tt)}</td><td>{money(row.sp)}</td><td>{money(row.lzd)}</td><td>{percent(row.total ? row.shelf / row.total : 0)}</td><td>{money(row.ttSubsidy)}</td><td>{money(row.spSubsidy)}</td></tr>)}</tbody></table></div>
+              <div className="table-wrap"><table><thead><tr><th>国家 / 品牌</th><th>全渠道</th><th>环比</th><th>同比</th><th>TikTok<br /><small>销售 / 环比 / 同比</small></th><th>Shopee<br /><small>销售 / 环比 / 同比</small></th><th>Lazada<br /><small>销售 / 环比</small></th><th>货架占比</th><th>TT补贴</th><th>SP补贴</th></tr></thead><tbody>{matrix.map((row) => <tr key={`${row.country}-${row.brand}`}><td><b>{row.brand}</b><span>{row.country}</span></td><td><strong>{money(row.total)}</strong></td><td><span className={Number.isFinite(row.mom) && row.mom >= 0 ? "table-up" : "table-down"}>{deltaLabel(row.mom)}</span></td><td><span className={Number.isFinite(row.yoy) && row.yoy >= 0 ? "table-up" : "table-down"}>{deltaLabel(row.yoy)}</span></td><td><ChannelTableMetric amount={row.tt} mom={row.ttMom} yoy={row.ttYoy} /></td><td><ChannelTableMetric amount={row.sp} mom={row.spMom} yoy={row.spYoy} /></td><td><ChannelTableMetric amount={row.lzd} mom={row.lzdMom} /></td><td>{percent(row.total ? row.shelf / row.total : 0)}</td><td>{money(row.ttSubsidy)}</td><td>{money(row.spSubsidy)}</td></tr>)}</tbody></table></div>
             </section>
           )}
 
