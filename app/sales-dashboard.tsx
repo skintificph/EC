@@ -107,19 +107,26 @@ function cutoffForMonth(rows: SaleRow[], month: string) {
   return Math.max(...positiveDates.map((date) => Number(date.slice(8, 10))));
 }
 
-function periodRows(rows: SaleRow[], mode: TimeMode, selection: string, cutoffDay?: number) {
+function periodRows(rows: SaleRow[], mode: TimeMode, selection: string, cutoffDay?: number, rangeEnd?: string) {
   if (mode === "day") {
-    const previous = addDays(selection, -1);
-    const yoy = previousYearDate(selection);
+    const requestedEnd = rangeEnd || selection;
+    const start = selection <= requestedEnd ? selection : requestedEnd;
+    const end = selection <= requestedEnd ? requestedEnd : selection;
+    const durationDays = Math.round((Date.parse(`${end}T00:00:00Z`) - Date.parse(`${start}T00:00:00Z`)) / 86400000) + 1;
+    const previousEnd = addDays(start, -1);
+    const previousStart = addDays(previousEnd, -(durationDays - 1));
+    const yoyStart = previousYearDate(start);
+    const yoyEnd = previousYearDate(end);
+    const withinRange = (row: SaleRow, from: string, to: string) => row.date >= from && row.date <= to;
     return {
-      current: rows.filter((r) => r.date === selection),
-      previous: rows.filter((r) => r.date === previous),
-      yoy: rows.filter((r) => r.date === yoy),
-      anchorDate: selection,
-      periodLabel: selection,
-      previousLabel: previous,
-      yoyLabel: yoy,
-      cutoffDay: Number(selection.slice(8, 10)),
+      current: rows.filter((r) => withinRange(r, start, end)),
+      previous: rows.filter((r) => withinRange(r, previousStart, previousEnd)),
+      yoy: rows.filter((r) => withinRange(r, yoyStart, yoyEnd)),
+      anchorDate: end,
+      periodLabel: start === end ? start : `${start} 至 ${end}`,
+      previousLabel: previousStart === previousEnd ? previousStart : `${previousStart} 至 ${previousEnd}`,
+      yoyLabel: yoyStart === yoyEnd ? yoyStart : `${yoyStart} 至 ${yoyEnd}`,
+      cutoffDay: Number(end.slice(8, 10)),
     };
   }
 
@@ -288,7 +295,8 @@ export function SalesDashboard() {
   const [brand, setBrand] = useState(ALL_BRANDS);
   const [view, setView] = useState<View>("overview");
   const [timeMode, setTimeMode] = useState<TimeMode>("month");
-  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedStartDate, setSelectedStartDate] = useState("");
+  const [selectedEndDate, setSelectedEndDate] = useState("");
   const [selectedMonth, setSelectedMonth] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
@@ -331,11 +339,13 @@ export function SalesDashboard() {
   const countries = useMemo(() => [...new Set(rows.map((r) => r.country))].sort(), [rows]);
   const brands = useMemo(() => [...new Set(rows.filter((r) => country === ALL_COUNTRIES || r.country === country).map((r) => r.brand))].sort(), [rows, country]);
   const filtered = useMemo(() => rows.filter((r) => (country === ALL_COUNTRIES || r.country === country) && (brand === ALL_BRANDS || r.brand === brand)), [rows, country, brand]);
-  const effectiveDate = selectedDate || latestDate;
+  const effectiveStartDate = selectedStartDate || latestDate;
+  const effectiveEndDate = selectedEndDate || latestDate;
   const effectiveMonth = selectedMonth || latestDate.slice(0, 7);
-  const selection = timeMode === "day" ? effectiveDate : effectiveMonth;
+  const selection = timeMode === "day" ? effectiveStartDate : effectiveMonth;
+  const rangeEnd = timeMode === "day" ? effectiveEndDate : undefined;
   const sharedCutoff = useMemo(() => timeMode === "month" && effectiveMonth ? cutoffForMonth(rows, effectiveMonth) : undefined, [rows, effectiveMonth, timeMode]);
-  const periods = useMemo(() => selection ? periodRows(filtered, timeMode, selection, sharedCutoff) : null, [filtered, timeMode, selection, sharedCutoff]);
+  const periods = useMemo(() => selection ? periodRows(filtered, timeMode, selection, sharedCutoff, rangeEnd) : null, [filtered, timeMode, selection, sharedCutoff, rangeEnd]);
   const current = useMemo(() => periods ? sum(periods.current) : { ...EMPTY }, [periods]);
   const previous = useMemo(() => periods ? sum(periods.previous) : { ...EMPTY }, [periods]);
   const yoy = useMemo(() => periods ? sum(periods.yoy) : { ...EMPTY }, [periods]);
@@ -358,13 +368,13 @@ export function SalesDashboard() {
     return keys.map((key) => {
       const [itemCountry, itemBrand] = key.split("|");
       const group = rows.filter((r) => r.country === itemCountry && r.brand === itemBrand);
-      const itemPeriods = periodRows(group, timeMode, selection, sharedCutoff);
+      const itemPeriods = periodRows(group, timeMode, selection, sharedCutoff, rangeEnd);
       const now = sum(itemPeriods.current);
       const prev = sum(itemPeriods.previous);
       const lastYear = sum(itemPeriods.yoy);
       return { country: itemCountry, brand: itemBrand, ...now, mom: growth(now.total, prev.total), yoy: growth(now.total, lastYear.total) };
     }).sort((a, b) => b.total - a.total);
-  }, [rows, timeMode, selection, sharedCutoff, country, brand]);
+  }, [rows, timeMode, selection, sharedCutoff, rangeEnd, country, brand]);
 
   const analysis = useMemo(() => {
     if (!periods || !matrix.length) return [];
@@ -382,7 +392,7 @@ export function SalesDashboard() {
     return [
       {
         tag: "整体走势",
-        title: `${timeMode === "day" ? "所选日" : "所选月"}销售${Number.isFinite(totalMom) && totalMom >= 0 ? "增长" : "承压"}`,
+        title: `${timeMode === "day" ? "所选区间" : "所选月"}销售${Number.isFinite(totalMom) && totalMom >= 0 ? "增长" : "承压"}`,
         text: `全渠道 ${money(current.total)}，环比 ${deltaLabel(totalMom)}，同比 ${deltaLabel(totalYoy)}。`,
         tone: "blue",
       },
@@ -416,10 +426,10 @@ export function SalesDashboard() {
   const tabs: Array<{ id: View; label: string; hint: string }> = [
     { id: "overview", label: "全渠道总览", hint: "国家 × 品牌" },
     { id: "month", label: "周期累计分析", hint: "同期对比" },
-    { id: "recent", label: "短周期监控", hint: "单日与近7天" },
+    { id: "recent", label: "短周期监控", hint: "区间末日与近7天" },
   ];
 
-  const comparisonLabels = timeMode === "day" ? ["所选日", "前一日", "去年同日"] : ["所选月", "上月同期", "去年同期"];
+  const comparisonLabels = timeMode === "day" ? ["所选区间", "上一等长周期", "去年同期"] : ["所选月", "上月同期", "去年同期"];
   const scopeLabel = `${country === ALL_COUNTRIES ? "全国家" : country} · ${brand === ALL_BRANDS ? "全品牌" : brand}`;
 
   return (
@@ -436,10 +446,6 @@ export function SalesDashboard() {
         </div>
       </header>
 
-      <nav className="tabs" aria-label="看板视图">
-        {tabs.map((tab) => <button key={tab.id} className={view === tab.id ? "active" : ""} onClick={() => setView(tab.id)}><b>{tab.label}</b><span>{tab.hint}</span></button>)}
-      </nav>
-
       <section className="filter-panel">
         <div className="filter-copy"><span>VIEW CONTROL</span><h2>筛选与时间</h2><p>所有指标、图表和自动摘要同步更新</p></div>
         <label>国家<select value={country} onChange={(event) => { setCountry(event.target.value); setBrand(ALL_BRANDS); }}><option>{ALL_COUNTRIES}</option>{countries.map((item) => <option key={item}>{item}</option>)}</select></label>
@@ -447,11 +453,15 @@ export function SalesDashboard() {
         <div className="time-control">
           <span>时间粒度</span>
           <div className="time-toggle" aria-label="时间粒度">
-            <button className={timeMode === "day" ? "active" : ""} aria-pressed={timeMode === "day"} onClick={() => { setTimeMode("day"); if (!selectedDate && latestDate) setSelectedDate(latestDate); }}>按日</button>
+            <button className={timeMode === "day" ? "active" : ""} aria-pressed={timeMode === "day"} onClick={() => { setTimeMode("day"); if (!selectedStartDate && latestDate) setSelectedStartDate(latestDate); if (!selectedEndDate && latestDate) setSelectedEndDate(latestDate); }}>按日</button>
             <button className={timeMode === "month" ? "active" : ""} aria-pressed={timeMode === "month"} onClick={() => { setTimeMode("month"); if (!selectedMonth && latestDate) setSelectedMonth(latestDate.slice(0, 7)); }}>按月</button>
           </div>
           {timeMode === "day" ? (
-            <input aria-label="选择日期" type="date" value={effectiveDate} min={earliestDate} max={latestDate} onChange={(event) => setSelectedDate(event.target.value)} />
+            <div className="date-range">
+              <label>开始日期<input aria-label="开始日期" type="date" value={effectiveStartDate} min={earliestDate} max={effectiveEndDate || latestDate} onChange={(event) => { const value = event.target.value; setSelectedStartDate(value); if (value > effectiveEndDate) setSelectedEndDate(value); }} /></label>
+              <b>至</b>
+              <label>结束日期<input aria-label="结束日期" type="date" value={effectiveEndDate} min={effectiveStartDate || earliestDate} max={latestDate} onChange={(event) => { const value = event.target.value; setSelectedEndDate(value); if (value < effectiveStartDate) setSelectedStartDate(value); }} /></label>
+            </div>
           ) : (
             <input aria-label="选择月份" type="month" value={effectiveMonth} min={earliestDate.slice(0, 7)} max={latestDate.slice(0, 7)} onChange={(event) => setSelectedMonth(event.target.value)} />
           )}
@@ -465,7 +475,7 @@ export function SalesDashboard() {
       {!loading && !error && periods && (
         <>
           <section className="kpi-grid">
-            <KpiCard eyebrow={timeMode === "day" ? "所选日全渠道销售" : "所选月全渠道销售"} value={money(current.total)} tone="#5D7389" mom={growth(current.total, previous.total)} yoy={growth(current.total, yoy.total)} />
+            <KpiCard eyebrow={timeMode === "day" ? "所选区间全渠道销售" : "所选月全渠道销售"} value={money(current.total)} tone="#5D7389" mom={growth(current.total, previous.total)} yoy={growth(current.total, yoy.total)} />
             <KpiCard eyebrow="TikTok 销售" value={money(current.tt)} tone={COLORS.tt} detail={`占全渠道 ${percent(current.total ? current.tt / current.total : 0)}`} mom={growth(current.tt, previous.tt)} yoy={growth(current.tt, yoy.tt)} />
             <KpiCard eyebrow="货架销售" value={money(current.shelf)} tone={COLORS.sp} detail={`Shopee ${money(current.sp)} · Lazada ${money(current.lzd)}`} mom={growth(current.shelf, previous.shelf)} yoy={growth(current.shelf, yoy.shelf)} />
             <KpiCard eyebrow="TT 平台补贴" value={money(current.ttSubsidy)} tone={COLORS.ttSub} detail={`补贴率 ${percent(current.tt ? current.ttSubsidy / current.tt : 0)}`} mom={growth(current.ttSubsidy, previous.ttSubsidy)} yoy={growth(current.ttSubsidy, yoy.ttSubsidy)} />
@@ -479,6 +489,10 @@ export function SalesDashboard() {
               {analysis.map((item) => <article className={`auto-insight ${item.tone}`} key={item.tag}><span>{item.tag}</span><strong>{item.title}</strong><p>{item.text}</p></article>)}
             </div>
           </section>
+
+          <nav className="tabs analysis-tabs" aria-label="看板视图">
+            {tabs.map((tab) => <button key={tab.id} className={view === tab.id ? "active" : ""} onClick={() => setView(tab.id)}><b>{tab.label}</b><span>{tab.hint}</span></button>)}
+          </nav>
 
           {view === "overview" && (
             <section className="content-card">

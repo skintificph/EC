@@ -64,7 +64,6 @@ test("server-renders the SEA sales dashboard", async () => {
   const html = await response.text();
   assert.match(html, /SEA 销售经营看板/);
   assert.match(html, /东南亚销售/);
-  assert.match(html, /全渠道总览/);
   assert.match(html, /TikTok、Shopee、Lazada/);
   assert.match(html, /筛选与时间/);
   assert.match(html, /时间粒度/);
@@ -75,6 +74,12 @@ test("includes the meeting notes and automatic review modules", async () => {
   const source = await readFile(new URL("../app/sales-dashboard.tsx", import.meta.url), "utf8");
   assert.match(source, /数据刷新摘要/);
   assert.match(source, /会议小结与分析结论/);
+  assert.match(source, /全渠道总览/);
+  assert.match(source, /周期累计分析/);
+  assert.match(source, /短周期监控/);
+  assert.match(source, /开始日期/);
+  assert.match(source, /结束日期/);
+  assert.match(source, /上一等长周期/);
   assert.match(source, /type="date"/);
   assert.match(source, /type="month"/);
 });

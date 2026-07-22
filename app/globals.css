@@ -55,7 +55,7 @@ main { width: min(1760px, calc(100% - 56px)); margin: 0 auto; padding: 48px 0 30
 .tabs b { font-size: 18px; }
 .tabs span { font-size: 14px; opacity: .72; }
 
-.filter-panel { display: grid; grid-template-columns: 1.1fr .8fr .8fr 1.25fr 1fr; gap: 20px; align-items: end; padding: 28px 30px; margin-bottom: 24px; background: var(--card); border: 1px solid rgba(255,255,255,.92); border-radius: 30px; box-shadow: var(--shadow); }
+.filter-panel { display: grid; grid-template-columns: 1.05fr .7fr .7fr 1.85fr .9fr; gap: 20px; align-items: end; padding: 28px 30px; margin-bottom: 24px; background: var(--card); border: 1px solid rgba(255,255,255,.92); border-radius: 30px; box-shadow: var(--shadow); }
 .filter-copy h2, .section-heading h2, .notes-heading h2 { margin: 6px 0 5px; font-size: 30px; letter-spacing: -.04em; }
 .filter-copy p, .section-heading p, .notes-heading p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.55; }
 .filter-panel label, .time-control { display: grid; gap: 10px; color: var(--muted); font-size: 14px; font-weight: 750; }
@@ -66,6 +66,10 @@ main { width: min(1760px, calc(100% - 56px)); margin: 0 auto; padding: 48px 0 30
 .time-toggle { display: flex; align-self: stretch; padding: 4px; border-radius: 15px; background: #e6f0f3; }
 .time-toggle button { min-width: 68px; border: 0; border-radius: 11px; background: transparent; color: var(--muted); font-weight: 800; cursor: pointer; }
 .time-toggle button.active { color: white; background: #5d7389; box-shadow: 0 5px 14px rgba(71,91,109,.2); }
+.date-range { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr); gap: 10px; align-items: end; }
+.date-range label { gap: 6px; min-width: 0; font-size: 12px; }
+.date-range input { min-width: 0; padding-inline: 12px; }
+.date-range > b { align-self: center; margin-top: 20px; color: var(--muted); font-size: 13px; }
 .scope-chip { display: grid; gap: 4px; min-height: 78px; padding: 15px 18px; border-radius: 19px; background: linear-gradient(145deg, #dbeff6, #e8f2f4); }
 .scope-chip span, .scope-chip small { color: var(--muted); font-size: 13px; }
 .scope-chip strong { font-size: 18px; }
@@ -215,6 +219,8 @@ footer a { color: var(--ink); text-decoration: none; font-weight: 750; }
   .time-control { grid-template-columns: 1fr; }
   .time-control > span { grid-column: auto; }
   .time-toggle { min-height: 52px; }
+  .date-range { grid-template-columns: 1fr; }
+  .date-range > b { display: none; }
   .kpi-grid { grid-template-columns: 1fr; }
   .kpi-card { min-height: 205px; padding: 24px; }
   .content-card, .auto-insights, .meeting-notes { padding: 22px; border-radius: 26px; }
