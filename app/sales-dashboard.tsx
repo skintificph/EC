@@ -20,9 +20,19 @@ type SaleRow = {
 
 type Totals = Pick<SaleRow, "tt" | "ttSubsidy" | "sp" | "spSubsidy" | "lzd" | "shelf" | "total">;
 type View = "overview" | "month" | "recent";
+type TimeMode = "day" | "month";
 
+const ALL_COUNTRIES = "全部国家";
+const ALL_BRANDS = "全部品牌";
+const NOTES_KEY = "sea-sales-dashboard-meeting-notes";
 const EMPTY: Totals = { tt: 0, ttSubsidy: 0, sp: 0, spSubsidy: 0, lzd: 0, shelf: 0, total: 0 };
-const COLORS = { tt: "#8fa89a", sp: "#8ea6b4", lzd: "#c7b18a", ttSub: "#ad8794", spSub: "#8b789a" };
+const COLORS = {
+  tt: "#5D7389",
+  sp: "#7FAFBE",
+  lzd: "#A8D8E3",
+  ttSub: "#A68E98",
+  spSub: "#82758E",
+};
 
 function sum(rows: SaleRow[]): Totals {
   return rows.reduce(
@@ -69,6 +79,20 @@ function addDays(value: string, days: number) {
   return date.toISOString().slice(0, 10);
 }
 
+function previousYearDate(value: string) {
+  const date = utcDate(value);
+  const year = date.getUTCFullYear() - 1;
+  const month = date.getUTCMonth();
+  const day = date.getUTCDate();
+  const lastDay = new Date(Date.UTC(year, month + 1, 0)).getUTCDate();
+  return new Date(Date.UTC(year, month, Math.min(day, lastDay))).toISOString().slice(0, 10);
+}
+
+function daysInMonth(month: string) {
+  const [year, monthNumber] = month.split("-").map(Number);
+  return new Date(Date.UTC(year, monthNumber, 0)).getUTCDate();
+}
+
 function aggregateByDay(rows: SaleRow[]) {
   const map = new Map<string, SaleRow[]>();
   rows.forEach((row) => map.set(row.date, [...(map.get(row.date) ?? []), row]));
@@ -77,62 +101,98 @@ function aggregateByDay(rows: SaleRow[]) {
     .map(([date, values]) => ({ date, ...sum(values) }));
 }
 
-function periodRows(rows: SaleRow[], asOf: string) {
-  const d = utcDate(asOf);
-  const year = d.getUTCFullYear();
-  const month = d.getUTCMonth();
-  const day = d.getUTCDate();
-  const previous = new Date(Date.UTC(year, month - 1, 1));
-  const previousLastDay = new Date(Date.UTC(year, month, 0)).getUTCDate();
+function cutoffForMonth(rows: SaleRow[], month: string) {
+  const positiveDates = rows.filter((r) => r.date.startsWith(`${month}-`) && r.total > 0).map((r) => r.date);
+  if (!positiveDates.length) return daysInMonth(month);
+  return Math.max(...positiveDates.map((date) => Number(date.slice(8, 10))));
+}
+
+function periodRows(rows: SaleRow[], mode: TimeMode, selection: string, cutoffDay?: number) {
+  if (mode === "day") {
+    const previous = addDays(selection, -1);
+    const yoy = previousYearDate(selection);
+    return {
+      current: rows.filter((r) => r.date === selection),
+      previous: rows.filter((r) => r.date === previous),
+      yoy: rows.filter((r) => r.date === yoy),
+      anchorDate: selection,
+      periodLabel: selection,
+      previousLabel: previous,
+      yoyLabel: yoy,
+      cutoffDay: Number(selection.slice(8, 10)),
+    };
+  }
+
+  const [year, monthNumber] = selection.split("-").map(Number);
+  const cutoff = cutoffDay ?? cutoffForMonth(rows, selection);
+  const previousMonthDate = new Date(Date.UTC(year, monthNumber - 2, 1));
+  const previousMonth = previousMonthDate.toISOString().slice(0, 7);
+  const yoyMonth = `${year - 1}-${String(monthNumber).padStart(2, "0")}`;
+  const previousCutoff = Math.min(cutoff, daysInMonth(previousMonth));
+  const yoyCutoff = Math.min(cutoff, daysInMonth(yoyMonth));
+  const within = (row: SaleRow, month: string, day: number) => row.date.startsWith(`${month}-`) && Number(row.date.slice(8, 10)) <= day;
+  const anchorDay = Math.min(cutoff, daysInMonth(selection));
   return {
-    current: rows.filter((r) => {
-      const x = utcDate(r.date);
-      return x.getUTCFullYear() === year && x.getUTCMonth() === month && x.getUTCDate() <= day;
-    }),
-    previous: rows.filter((r) => {
-      const x = utcDate(r.date);
-      return (
-        x.getUTCFullYear() === previous.getUTCFullYear() &&
-        x.getUTCMonth() === previous.getUTCMonth() &&
-        x.getUTCDate() <= Math.min(day, previousLastDay)
-      );
-    }),
-    yoy: rows.filter((r) => {
-      const x = utcDate(r.date);
-      return x.getUTCFullYear() === year - 1 && x.getUTCMonth() === month && x.getUTCDate() <= day;
-    }),
+    current: rows.filter((r) => within(r, selection, anchorDay)),
+    previous: rows.filter((r) => within(r, previousMonth, previousCutoff)),
+    yoy: rows.filter((r) => within(r, yoyMonth, yoyCutoff)),
+    anchorDate: `${selection}-${String(anchorDay).padStart(2, "0")}`,
+    periodLabel: `${selection}-01 至 ${String(anchorDay).padStart(2, "0")}日`,
+    previousLabel: `${previousMonth}-01 至 ${String(previousCutoff).padStart(2, "0")}日`,
+    yoyLabel: `${yoyMonth}-01 至 ${String(yoyCutoff).padStart(2, "0")}日`,
+    cutoffDay: anchorDay,
   };
 }
 
-function Change({ value, suffix = "" }: { value: number; suffix?: string }) {
+function Change({ value, suffix = "%" }: { value: number; suffix?: string }) {
   const positive = Number.isFinite(value) && value >= 0;
   return (
     <span className={`change ${!Number.isFinite(value) ? "neutral" : positive ? "up" : "down"}`}>
-      {Number.isFinite(value) ? `${positive ? "↑" : "↓"} ${Math.abs(value * 100).toFixed(1)}${suffix || "%"}` : "历史不足"}
+      {Number.isFinite(value) ? `${positive ? "↑" : "↓"} ${Math.abs(value * 100).toFixed(1)}${suffix}` : "历史不足"}
     </span>
   );
 }
 
-function KpiCard({ eyebrow, value, note, tone }: { eyebrow: string; value: string; note: React.ReactNode; tone: string }) {
+function KpiCard({
+  eyebrow,
+  value,
+  detail,
+  mom,
+  yoy,
+  tone,
+  pointChange = false,
+}: {
+  eyebrow: string;
+  value: string;
+  detail?: string;
+  mom: number;
+  yoy: number;
+  tone: string;
+  pointChange?: boolean;
+}) {
   return (
     <article className="kpi-card" style={{ "--tone": tone } as React.CSSProperties}>
       <div className="kpi-top"><span className="tone-dot" />{eyebrow}</div>
       <strong>{value}</strong>
-      <div className="kpi-note">{note}</div>
+      {detail && <p className="kpi-detail">{detail}</p>}
+      <div className="kpi-comparisons">
+        <span>环比 <Change value={mom} suffix={pointChange ? "pp" : "%"} /></span>
+        <span>同比 <Change value={yoy} suffix={pointChange ? "pp" : "%"} /></span>
+      </div>
     </article>
   );
 }
 
-function ComparisonBars({ current, previous, yoy }: { current: Totals; previous: Totals; yoy: Totals }) {
-  const rows = [
+function ComparisonBars({ current, previous, yoy, labels }: { current: Totals; previous: Totals; yoy: Totals; labels: string[] }) {
+  const channels = [
     { label: "TikTok", key: "tt" as const, color: COLORS.tt },
     { label: "Shopee", key: "sp" as const, color: COLORS.sp },
     { label: "Lazada", key: "lzd" as const, color: COLORS.lzd },
   ];
-  const max = Math.max(1, ...rows.flatMap((r) => [current[r.key], previous[r.key], yoy[r.key]]));
+  const max = Math.max(1, ...channels.flatMap((r) => [current[r.key], previous[r.key], yoy[r.key]]));
   return (
     <div className="comparison-bars">
-      {rows.map((row) => (
+      {channels.map((row) => (
         <div className="channel-row" key={row.key}>
           <div className="channel-label"><span style={{ background: row.color }} />{row.label}</div>
           <div className="bar-cluster">
@@ -142,7 +202,7 @@ function ComparisonBars({ current, previous, yoy }: { current: Totals; previous:
           </div>
         </div>
       ))}
-      <div className="bar-legend"><span><i className="legend-solid" />本月同期</span><span><i className="legend-soft" />上月同期</span><span><i className="legend-faint" />去年同期</span></div>
+      <div className="bar-legend"><span><i className="legend-solid" />{labels[0]}</span><span><i className="legend-soft" />{labels[1]}</span><span><i className="legend-faint" />{labels[2]}</span></div>
     </div>
   );
 }
@@ -153,8 +213,8 @@ function TrendCanvas({ data }: { data: Array<{ date: string } & Totals> }) {
     const canvas = ref.current;
     if (!canvas || !data.length) return;
     const draw = () => {
-      const width = canvas.parentElement?.clientWidth ?? 900;
-      const height = 330;
+      const width = canvas.parentElement?.clientWidth ?? 1200;
+      const height = 430;
       const dpr = window.devicePixelRatio || 1;
       canvas.width = width * dpr;
       canvas.height = height * dpr;
@@ -164,54 +224,54 @@ function TrendCanvas({ data }: { data: Array<{ date: string } & Totals> }) {
       if (!ctx) return;
       ctx.scale(dpr, dpr);
       ctx.clearRect(0, 0, width, height);
-      const pad = { left: 58, right: 58, top: 18, bottom: 46 };
-      const cw = width - pad.left - pad.right;
-      const ch = height - pad.top - pad.bottom;
+      const pad = { left: 78, right: 82, top: 24, bottom: 62 };
+      const chartWidth = width - pad.left - pad.right;
+      const chartHeight = height - pad.top - pad.bottom;
       const maxSale = Math.max(1, ...data.map((d) => d.total)) * 1.12;
-      const maxSub = Math.max(1, ...data.map((d) => d.ttSubsidy + d.spSubsidy)) * 1.15;
-      ctx.font = "11px system-ui";
-      ctx.fillStyle = "#817b80";
-      ctx.strokeStyle = "#e8e1de";
+      const maxSubsidy = Math.max(1, ...data.map((d) => d.ttSubsidy + d.spSubsidy)) * 1.15;
+      ctx.font = "14px Inter, system-ui";
+      ctx.fillStyle = "#657786";
+      ctx.strokeStyle = "#D7E3E7";
       ctx.lineWidth = 1;
       for (let i = 0; i <= 4; i += 1) {
-        const y = pad.top + (ch / 4) * i;
+        const y = pad.top + (chartHeight / 4) * i;
         ctx.beginPath(); ctx.moveTo(pad.left, y); ctx.lineTo(width - pad.right, y); ctx.stroke();
         const value = maxSale * (1 - i / 4);
-        ctx.fillText(value >= 10000 ? `${(value / 10000).toFixed(0)}万` : value.toFixed(0), 8, y + 4);
+        ctx.fillText(value >= 10_000 ? `${(value / 10_000).toFixed(0)}万` : value.toFixed(0), 10, y + 5);
       }
-      const slot = cw / data.length;
-      const barWidth = Math.max(4, Math.min(20, slot * 0.58));
+      const slot = chartWidth / data.length;
+      const barWidth = Math.max(6, Math.min(28, slot * 0.62));
       data.forEach((d, i) => {
         const x = pad.left + i * slot + (slot - barWidth) / 2;
-        let bottom = pad.top + ch;
+        let bottom = pad.top + chartHeight;
         ([{ v: d.tt, c: COLORS.tt }, { v: d.sp, c: COLORS.sp }, { v: d.lzd, c: COLORS.lzd }]).forEach((part) => {
-          const h = (part.v / maxSale) * ch;
+          const h = (part.v / maxSale) * chartHeight;
           ctx.fillStyle = part.c; ctx.fillRect(x, bottom - h, barWidth, h); bottom -= h;
         });
         if (i % Math.max(1, Math.ceil(data.length / 10)) === 0 || i === data.length - 1) {
-          ctx.save(); ctx.translate(x + barWidth / 2, height - 25); ctx.rotate(-0.45); ctx.fillStyle = "#817b80"; ctx.fillText(d.date.slice(5), 0, 0); ctx.restore();
+          ctx.save(); ctx.translate(x + barWidth / 2, height - 35); ctx.rotate(-0.45); ctx.fillStyle = "#657786"; ctx.fillText(d.date.slice(5), 0, 0); ctx.restore();
         }
       });
       const line = (key: "ttSubsidy" | "spSubsidy", color: string) => {
         ctx.beginPath();
         data.forEach((d, i) => {
           const x = pad.left + slot * (i + 0.5);
-          const y = pad.top + ch - (d[key] / maxSub) * ch;
+          const y = pad.top + chartHeight - (d[key] / maxSubsidy) * chartHeight;
           if (i === 0) ctx.moveTo(x, y); else ctx.lineTo(x, y);
         });
-        ctx.strokeStyle = color; ctx.lineWidth = 2.2; ctx.stroke();
+        ctx.strokeStyle = color; ctx.lineWidth = 3; ctx.stroke();
         data.forEach((d, i) => {
           const x = pad.left + slot * (i + 0.5);
-          const y = pad.top + ch - (d[key] / maxSub) * ch;
-          ctx.beginPath(); ctx.arc(x, y, 2.4, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
+          const y = pad.top + chartHeight - (d[key] / maxSubsidy) * chartHeight;
+          ctx.beginPath(); ctx.arc(x, y, 3.4, 0, Math.PI * 2); ctx.fillStyle = color; ctx.fill();
         });
       };
       line("ttSubsidy", COLORS.ttSub);
       line("spSubsidy", COLORS.spSub);
-      ctx.fillStyle = "#817b80";
+      ctx.fillStyle = "#657786";
       ctx.textAlign = "right";
-      ctx.fillText(`${money(maxSub)}`, width - 6, pad.top + 4);
-      ctx.fillText("补贴", width - 6, pad.top + 20);
+      ctx.fillText(money(maxSubsidy), width - 8, pad.top + 5);
+      ctx.fillText("补贴", width - 8, pad.top + 24);
       ctx.textAlign = "left";
     };
     draw();
@@ -219,17 +279,22 @@ function TrendCanvas({ data }: { data: Array<{ date: string } & Totals> }) {
     if (canvas.parentElement) observer.observe(canvas.parentElement);
     return () => observer.disconnect();
   }, [data]);
-  return <canvas ref={ref} aria-label="本月每日各渠道销售柱状图，以及 TikTok 和 Shopee 平台补贴趋势折线图" />;
+  return <canvas ref={ref} aria-label="所选月份每日各渠道销售柱状图，以及 TikTok 和 Shopee 平台补贴趋势折线图" />;
 }
 
 export function SalesDashboard() {
   const [rows, setRows] = useState<SaleRow[]>([]);
-  const [country, setCountry] = useState("全部国家");
-  const [brand, setBrand] = useState("全部品牌");
+  const [country, setCountry] = useState(ALL_COUNTRIES);
+  const [brand, setBrand] = useState(ALL_BRANDS);
   const [view, setView] = useState<View>("overview");
+  const [timeMode, setTimeMode] = useState<TimeMode>("month");
+  const [selectedDate, setSelectedDate] = useState("");
+  const [selectedMonth, setSelectedMonth] = useState("");
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState("");
   const [refreshedAt, setRefreshedAt] = useState("");
+  const [meetingNotes, setMeetingNotes] = useState("");
+  const [notesStatus, setNotesStatus] = useState("本机自动保存");
 
   useEffect(() => {
     const load = async () => {
@@ -249,36 +314,113 @@ export function SalesDashboard() {
     load();
   }, []);
 
+  useEffect(() => {
+    const timer = window.setTimeout(() => setMeetingNotes(localStorage.getItem(NOTES_KEY) ?? ""), 0);
+    return () => window.clearTimeout(timer);
+  }, []);
+
+  const updateMeetingNotes = (value: string) => {
+    setMeetingNotes(value);
+    localStorage.setItem(NOTES_KEY, value);
+    setNotesStatus(`已保存 · ${new Date().toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })}`);
+  };
+
+  const latestDate = useMemo(() => rows.filter((r) => r.total > 0).reduce((max, r) => (r.date > max ? r.date : max), ""), [rows]);
+  const earliestDate = useMemo(() => rows.filter((r) => r.total > 0).reduce((min, r) => (!min || r.date < min ? r.date : min), ""), [rows]);
+
   const countries = useMemo(() => [...new Set(rows.map((r) => r.country))].sort(), [rows]);
-  const brands = useMemo(() => [...new Set(rows.filter((r) => country === "全部国家" || r.country === country).map((r) => r.brand))].sort(), [rows, country]);
-  const filtered = useMemo(() => rows.filter((r) => (country === "全部国家" || r.country === country) && (brand === "全部品牌" || r.brand === brand)), [rows, country, brand]);
-  const asOf = useMemo(() => filtered.filter((r) => r.total > 0).reduce((max, r) => (r.date > max ? r.date : max), ""), [filtered]);
-  const periods = useMemo(() => asOf ? periodRows(filtered, asOf) : { current: [], previous: [], yoy: [] }, [filtered, asOf]);
-  const current = useMemo(() => sum(periods.current), [periods.current]);
-  const previous = useMemo(() => sum(periods.previous), [periods.previous]);
-  const yoy = useMemo(() => sum(periods.yoy), [periods.yoy]);
+  const brands = useMemo(() => [...new Set(rows.filter((r) => country === ALL_COUNTRIES || r.country === country).map((r) => r.brand))].sort(), [rows, country]);
+  const filtered = useMemo(() => rows.filter((r) => (country === ALL_COUNTRIES || r.country === country) && (brand === ALL_BRANDS || r.brand === brand)), [rows, country, brand]);
+  const effectiveDate = selectedDate || latestDate;
+  const effectiveMonth = selectedMonth || latestDate.slice(0, 7);
+  const selection = timeMode === "day" ? effectiveDate : effectiveMonth;
+  const sharedCutoff = useMemo(() => timeMode === "month" && effectiveMonth ? cutoffForMonth(rows, effectiveMonth) : undefined, [rows, effectiveMonth, timeMode]);
+  const periods = useMemo(() => selection ? periodRows(filtered, timeMode, selection, sharedCutoff) : null, [filtered, timeMode, selection, sharedCutoff]);
+  const current = useMemo(() => periods ? sum(periods.current) : { ...EMPTY }, [periods]);
+  const previous = useMemo(() => periods ? sum(periods.previous) : { ...EMPTY }, [periods]);
+  const yoy = useMemo(() => periods ? sum(periods.yoy) : { ...EMPTY }, [periods]);
+  const anchorDate = periods?.anchorDate ?? latestDate;
   const shelfShare = current.total ? current.shelf / current.total : 0;
-  const prevShelfShare = previous.total ? previous.shelf / previous.total : Number.NaN;
-  const yesterday = useMemo(() => sum(filtered.filter((r) => r.date === asOf)), [filtered, asOf]);
-  const last7 = useMemo(() => asOf ? sum(filtered.filter((r) => r.date >= addDays(asOf, -6) && r.date <= asOf)) : { ...EMPTY }, [filtered, asOf]);
-  const prev7 = useMemo(() => asOf ? sum(filtered.filter((r) => r.date >= addDays(asOf, -13) && r.date <= addDays(asOf, -7))) : { ...EMPTY }, [filtered, asOf]);
-  const daily = useMemo(() => aggregateByDay(periods.current), [periods.current]);
+  const previousShelfShare = previous.total ? previous.shelf / previous.total : Number.NaN;
+  const yoyShelfShare = yoy.total ? yoy.shelf / yoy.total : Number.NaN;
+
+  const yesterday = useMemo(() => sum(filtered.filter((r) => r.date === anchorDate)), [filtered, anchorDate]);
+  const priorDay = useMemo(() => sum(filtered.filter((r) => r.date === addDays(anchorDate, -1))), [filtered, anchorDate]);
+  const last7 = useMemo(() => anchorDate ? sum(filtered.filter((r) => r.date >= addDays(anchorDate, -6) && r.date <= anchorDate)) : { ...EMPTY }, [filtered, anchorDate]);
+  const prev7 = useMemo(() => anchorDate ? sum(filtered.filter((r) => r.date >= addDays(anchorDate, -13) && r.date <= addDays(anchorDate, -7))) : { ...EMPTY }, [filtered, anchorDate]);
+  const trendMonth = anchorDate.slice(0, 7);
+  const daily = useMemo(() => aggregateByDay(filtered.filter((r) => r.date.startsWith(`${trendMonth}-`) && r.date <= anchorDate)), [filtered, trendMonth, anchorDate]);
+
   const matrix = useMemo(() => {
-    if (!asOf) return [];
-    const keys = [...new Set(rows.map((r) => `${r.country}|${r.brand}`))];
+    if (!selection) return [];
+    const scopedRows = rows.filter((r) => (country === ALL_COUNTRIES || r.country === country) && (brand === ALL_BRANDS || r.brand === brand));
+    const keys = [...new Set(scopedRows.map((r) => `${r.country}|${r.brand}`))];
     return keys.map((key) => {
-      const [c, b] = key.split("|");
-      const p = periodRows(rows.filter((r) => r.country === c && r.brand === b), asOf);
-      const now = sum(p.current); const prev = sum(p.previous); const lastYear = sum(p.yoy);
-      return { country: c, brand: b, ...now, mom: growth(now.total, prev.total), yoy: growth(now.total, lastYear.total) };
-    }).filter((r) => (country === "全部国家" || r.country === country) && (brand === "全部品牌" || r.brand === brand)).sort((a, b) => b.total - a.total);
-  }, [rows, asOf, country, brand]);
+      const [itemCountry, itemBrand] = key.split("|");
+      const group = rows.filter((r) => r.country === itemCountry && r.brand === itemBrand);
+      const itemPeriods = periodRows(group, timeMode, selection, sharedCutoff);
+      const now = sum(itemPeriods.current);
+      const prev = sum(itemPeriods.previous);
+      const lastYear = sum(itemPeriods.yoy);
+      return { country: itemCountry, brand: itemBrand, ...now, mom: growth(now.total, prev.total), yoy: growth(now.total, lastYear.total) };
+    }).sort((a, b) => b.total - a.total);
+  }, [rows, timeMode, selection, sharedCutoff, country, brand]);
+
+  const analysis = useMemo(() => {
+    if (!periods || !matrix.length) return [];
+    const totalMom = growth(current.total, previous.total);
+    const totalYoy = growth(current.total, yoy.total);
+    const top = matrix[0];
+    const channelDeltas = [
+      { name: "TikTok", value: current.tt - previous.tt },
+      { name: "Shopee", value: current.sp - previous.sp },
+      { name: "Lazada", value: current.lzd - previous.lzd },
+    ].sort((a, b) => b.value - a.value);
+    const strongest = matrix.filter((item) => Number.isFinite(item.mom)).sort((a, b) => b.mom - a.mom)[0];
+    const subsidyRate = current.total ? (current.ttSubsidy + current.spSubsidy) / current.total : 0;
+    const previousSubsidyRate = previous.total ? (previous.ttSubsidy + previous.spSubsidy) / previous.total : Number.NaN;
+    return [
+      {
+        tag: "整体走势",
+        title: `${timeMode === "day" ? "所选日" : "所选月"}销售${Number.isFinite(totalMom) && totalMom >= 0 ? "增长" : "承压"}`,
+        text: `全渠道 ${money(current.total)}，环比 ${deltaLabel(totalMom)}，同比 ${deltaLabel(totalYoy)}。`,
+        tone: "blue",
+      },
+      {
+        tag: "核心贡献",
+        title: `${top.brand} · ${top.country}`,
+        text: `销售 ${money(top.total)}，占当前筛选范围 ${percent(current.total ? top.total / current.total : 0)}。`,
+        tone: "navy",
+      },
+      {
+        tag: "渠道变化",
+        title: `${channelDeltas[0].name} 是最大增量渠道`,
+        text: `较对比期变化 ${money(channelDeltas[0].value, false)}；${channelDeltas.at(-1)?.name} 变化 ${money(channelDeltas.at(-1)?.value ?? 0, false)}。`,
+        tone: "cyan",
+      },
+      {
+        tag: "值得关注",
+        title: strongest ? `${strongest.brand} · ${strongest.country} 环比领先` : "关注结构变化",
+        text: strongest ? `环比 ${deltaLabel(strongest.mom)}，当前销售 ${money(strongest.total)}。` : `货架占比 ${percent(shelfShare)}。`,
+        tone: "mauve",
+      },
+      {
+        tag: "补贴效率",
+        title: `综合补贴率 ${percent(subsidyRate)}`,
+        text: Number.isFinite(previousSubsidyRate) ? `较对比期${subsidyRate >= previousSubsidyRate ? "上升" : "下降"} ${Math.abs((subsidyRate - previousSubsidyRate) * 100).toFixed(1)}pp。` : "对比期数据不足。",
+        tone: "soft",
+      },
+    ];
+  }, [periods, matrix, current, previous, yoy, timeMode, shelfShare]);
 
   const tabs: Array<{ id: View; label: string; hint: string }> = [
     { id: "overview", label: "全渠道总览", hint: "国家 × 品牌" },
-    { id: "month", label: "月累计分析", hint: "MTD 同期对比" },
-    { id: "recent", label: "短周期监控", hint: "昨日与近7天" },
+    { id: "month", label: "周期累计分析", hint: "同期对比" },
+    { id: "recent", label: "短周期监控", hint: "单日与近7天" },
   ];
+
+  const comparisonLabels = timeMode === "day" ? ["所选日", "前一日", "去年同日"] : ["所选月", "上月同期", "去年同期"];
+  const scopeLabel = `${country === ALL_COUNTRIES ? "全国家" : country} · ${brand === ALL_BRANDS ? "全品牌" : brand}`;
 
   return (
     <main>
@@ -290,7 +432,7 @@ export function SalesDashboard() {
         </div>
         <div className="status-card">
           <span className={`pulse ${error ? "error" : ""}`} />
-          <div><small>数据截止日期</small><strong>{asOf || "读取中…"}</strong><span>{refreshedAt ? `看板更新 ${new Date(refreshedAt).toLocaleString("zh-CN", { hour12: false })}` : "正在连接数据源"}</span></div>
+          <div><small>数据最新日期</small><strong>{latestDate || "读取中…"}</strong><span>{refreshedAt ? `本次刷新 ${new Date(refreshedAt).toLocaleString("zh-CN", { hour12: false })}` : "正在连接数据源"}</span></div>
         </div>
       </header>
 
@@ -299,47 +441,66 @@ export function SalesDashboard() {
       </nav>
 
       <section className="filter-panel">
-        <div className="filter-copy"><span>VIEW CONTROL</span><h2>筛选视图</h2><p>所有指标与图表同步更新</p></div>
-        <label>国家<select value={country} onChange={(e) => { setCountry(e.target.value); setBrand("全部品牌"); }}><option>全部国家</option>{countries.map((c) => <option key={c}>{c}</option>)}</select></label>
-        <label>品牌<select value={brand} onChange={(e) => setBrand(e.target.value)}><option>全部品牌</option>{brands.map((b) => <option key={b}>{b}</option>)}</select></label>
-        <div className="scope-chip"><span>当前范围</span><strong>{country.replace("全部", "全")} · {brand.replace("全部", "全")}</strong><small>本月 1 日 — {asOf ? utcDate(asOf).getUTCDate() : "—"} 日</small></div>
+        <div className="filter-copy"><span>VIEW CONTROL</span><h2>筛选与时间</h2><p>所有指标、图表和自动摘要同步更新</p></div>
+        <label>国家<select value={country} onChange={(event) => { setCountry(event.target.value); setBrand(ALL_BRANDS); }}><option>{ALL_COUNTRIES}</option>{countries.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <label>品牌<select value={brand} onChange={(event) => setBrand(event.target.value)}><option>{ALL_BRANDS}</option>{brands.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <div className="time-control">
+          <span>时间粒度</span>
+          <div className="time-toggle" aria-label="时间粒度">
+            <button className={timeMode === "day" ? "active" : ""} aria-pressed={timeMode === "day"} onClick={() => { setTimeMode("day"); if (!selectedDate && latestDate) setSelectedDate(latestDate); }}>按日</button>
+            <button className={timeMode === "month" ? "active" : ""} aria-pressed={timeMode === "month"} onClick={() => { setTimeMode("month"); if (!selectedMonth && latestDate) setSelectedMonth(latestDate.slice(0, 7)); }}>按月</button>
+          </div>
+          {timeMode === "day" ? (
+            <input aria-label="选择日期" type="date" value={effectiveDate} min={earliestDate} max={latestDate} onChange={(event) => setSelectedDate(event.target.value)} />
+          ) : (
+            <input aria-label="选择月份" type="month" value={effectiveMonth} min={earliestDate.slice(0, 7)} max={latestDate.slice(0, 7)} onChange={(event) => setSelectedMonth(event.target.value)} />
+          )}
+        </div>
+        <div className="scope-chip"><span>当前范围</span><strong>{scopeLabel}</strong><small>{periods?.periodLabel ?? "等待数据"}</small></div>
       </section>
 
       {loading && <section className="state-panel"><div className="loader" /><h2>正在整理 10,000+ 条销售记录</h2><p>统一人民币口径并识别最新真实数据日</p></section>}
       {error && <section className="state-panel error-state"><h2>暂时无法读取在线表格</h2><p>{error}</p><button onClick={() => location.reload()}>重新读取</button></section>}
 
-      {!loading && !error && (
+      {!loading && !error && periods && (
         <>
           <section className="kpi-grid">
-            <KpiCard eyebrow="本月全渠道销售" value={money(current.total)} tone="#7f9489" note={<>环比上月同期 <Change value={growth(current.total, previous.total)} /></>} />
-            <KpiCard eyebrow="TikTok 销售" value={money(current.tt)} tone={COLORS.tt} note={<>占全渠道 {percent(current.total ? current.tt / current.total : 0)}</>} />
-            <KpiCard eyebrow="货架销售" value={money(current.shelf)} tone={COLORS.sp} note={<>Shopee {money(current.sp)} · Lazada {money(current.lzd)}</>} />
-            <KpiCard eyebrow="TT 平台补贴" value={money(current.ttSubsidy)} tone={COLORS.ttSub} note={<>补贴率 {percent(current.tt ? current.ttSubsidy / current.tt : 0)}</>} />
-            <KpiCard eyebrow="SP 平台补贴" value={money(current.spSubsidy)} tone={COLORS.spSub} note={<>补贴率 {percent(current.sp ? current.spSubsidy / current.sp : 0)}</>} />
-            <KpiCard eyebrow="货架占比" value={percent(shelfShare)} tone={COLORS.lzd} note={<>较上月同期 <Change value={shelfShare - prevShelfShare} suffix="pp" /></>} />
+            <KpiCard eyebrow={timeMode === "day" ? "所选日全渠道销售" : "所选月全渠道销售"} value={money(current.total)} tone="#5D7389" mom={growth(current.total, previous.total)} yoy={growth(current.total, yoy.total)} />
+            <KpiCard eyebrow="TikTok 销售" value={money(current.tt)} tone={COLORS.tt} detail={`占全渠道 ${percent(current.total ? current.tt / current.total : 0)}`} mom={growth(current.tt, previous.tt)} yoy={growth(current.tt, yoy.tt)} />
+            <KpiCard eyebrow="货架销售" value={money(current.shelf)} tone={COLORS.sp} detail={`Shopee ${money(current.sp)} · Lazada ${money(current.lzd)}`} mom={growth(current.shelf, previous.shelf)} yoy={growth(current.shelf, yoy.shelf)} />
+            <KpiCard eyebrow="TT 平台补贴" value={money(current.ttSubsidy)} tone={COLORS.ttSub} detail={`补贴率 ${percent(current.tt ? current.ttSubsidy / current.tt : 0)}`} mom={growth(current.ttSubsidy, previous.ttSubsidy)} yoy={growth(current.ttSubsidy, yoy.ttSubsidy)} />
+            <KpiCard eyebrow="SP 平台补贴" value={money(current.spSubsidy)} tone={COLORS.spSub} detail={`补贴率 ${percent(current.sp ? current.spSubsidy / current.sp : 0)}`} mom={growth(current.spSubsidy, previous.spSubsidy)} yoy={growth(current.spSubsidy, yoy.spSubsidy)} />
+            <KpiCard eyebrow="货架占比" value={percent(shelfShare)} tone="#91A9B7" detail="Shopee + Lazada" mom={shelfShare - previousShelfShare} yoy={shelfShare - yoyShelfShare} pointChange />
+          </section>
+
+          <section className="auto-insights">
+            <div className="section-heading"><div><span>AUTO REVIEW</span><h2>数据刷新摘要</h2><p>根据当前国家、品牌和时间范围自动生成</p></div><div className="analysis-badge"><i />已同步</div></div>
+            <div className="insight-strip">
+              {analysis.map((item) => <article className={`auto-insight ${item.tone}`} key={item.tag}><span>{item.tag}</span><strong>{item.title}</strong><p>{item.text}</p></article>)}
+            </div>
           </section>
 
           {view === "overview" && (
             <section className="content-card">
-              <div className="section-heading"><div><span>01 / OVERVIEW</span><h2>国家 × 品牌全渠道销售</h2><p>本月累计销售，按全渠道金额排序</p></div><div className="mini-summary"><small>覆盖组合</small><strong>{matrix.length}</strong></div></div>
-              <div className="table-wrap"><table><thead><tr><th>国家 / 品牌</th><th>全渠道</th><th>环比</th><th>同比</th><th>TikTok</th><th>Shopee</th><th>Lazada</th><th>货架占比</th><th>TT补贴</th><th>SP补贴</th></tr></thead><tbody>{matrix.map((r) => <tr key={`${r.country}-${r.brand}`}><td><b>{r.brand}</b><span>{r.country}</span></td><td><strong>{money(r.total)}</strong></td><td><span className={Number.isFinite(r.mom) && r.mom >= 0 ? "table-up" : "table-down"}>{deltaLabel(r.mom)}</span></td><td><span className={Number.isFinite(r.yoy) && r.yoy >= 0 ? "table-up" : "table-down"}>{deltaLabel(r.yoy)}</span></td><td>{money(r.tt)}</td><td>{money(r.sp)}</td><td>{money(r.lzd)}</td><td>{percent(r.total ? r.shelf / r.total : 0)}</td><td>{money(r.ttSubsidy)}</td><td>{money(r.spSubsidy)}</td></tr>)}</tbody></table></div>
+              <div className="section-heading"><div><span>01 / OVERVIEW</span><h2>国家 × 品牌全渠道销售</h2><p>{comparisonLabels.join("、")}，按全渠道金额排序</p></div><div className="mini-summary"><small>覆盖组合</small><strong>{matrix.length}</strong></div></div>
+              <div className="table-wrap"><table><thead><tr><th>国家 / 品牌</th><th>全渠道</th><th>环比</th><th>同比</th><th>TikTok</th><th>Shopee</th><th>Lazada</th><th>货架占比</th><th>TT补贴</th><th>SP补贴</th></tr></thead><tbody>{matrix.map((row) => <tr key={`${row.country}-${row.brand}`}><td><b>{row.brand}</b><span>{row.country}</span></td><td><strong>{money(row.total)}</strong></td><td><span className={Number.isFinite(row.mom) && row.mom >= 0 ? "table-up" : "table-down"}>{deltaLabel(row.mom)}</span></td><td><span className={Number.isFinite(row.yoy) && row.yoy >= 0 ? "table-up" : "table-down"}>{deltaLabel(row.yoy)}</span></td><td>{money(row.tt)}</td><td>{money(row.sp)}</td><td>{money(row.lzd)}</td><td>{percent(row.total ? row.shelf / row.total : 0)}</td><td>{money(row.ttSubsidy)}</td><td>{money(row.spSubsidy)}</td></tr>)}</tbody></table></div>
             </section>
           )}
 
           {view === "month" && (
             <div className="two-column">
               <section className="content-card">
-                <div className="section-heading"><div><span>02 / MONTH TO DATE</span><h2>分渠道销售对比</h2><p>本月同期、上月同期与去年同期</p></div></div>
-                <ComparisonBars current={current} previous={previous} yoy={yoy} />
+                <div className="section-heading"><div><span>02 / PERIOD COMPARISON</span><h2>分渠道销售对比</h2><p>{periods.periodLabel} · 对比 {periods.previousLabel} 与 {periods.yoyLabel}</p></div></div>
+                <ComparisonBars current={current} previous={previous} yoy={yoy} labels={comparisonLabels} />
               </section>
               <section className="content-card insight-card">
-                <div className="section-heading"><div><span>PERFORMANCE NOTES</span><h2>月累计概览</h2><p>同口径期间变化</p></div></div>
+                <div className="section-heading"><div><span>PERFORMANCE NOTES</span><h2>累计达成概览</h2><p>随时间选择动态变化</p></div></div>
                 <div className="insight-list">
                   <div><span>全渠道环比</span><strong>{deltaLabel(growth(current.total, previous.total))}</strong><Change value={growth(current.total, previous.total)} /></div>
                   <div><span>全渠道同比</span><strong>{deltaLabel(growth(current.total, yoy.total))}</strong><Change value={growth(current.total, yoy.total)} /></div>
-                  <div><span>TT平台补贴环比</span><strong>{deltaLabel(growth(current.ttSubsidy, previous.ttSubsidy))}</strong><Change value={growth(current.ttSubsidy, previous.ttSubsidy)} /></div>
-                  <div><span>SP平台补贴环比</span><strong>{deltaLabel(growth(current.spSubsidy, previous.spSubsidy))}</strong><Change value={growth(current.spSubsidy, previous.spSubsidy)} /></div>
-                  <div><span>货架占比变化</span><strong>{Number.isFinite(prevShelfShare) ? `${((shelfShare - prevShelfShare) * 100).toFixed(1)}pp` : "历史不足"}</strong><span className="muted">当前 {percent(shelfShare)}</span></div>
+                  <div><span>TT 平台补贴环比</span><strong>{deltaLabel(growth(current.ttSubsidy, previous.ttSubsidy))}</strong><Change value={growth(current.ttSubsidy, previous.ttSubsidy)} /></div>
+                  <div><span>SP 平台补贴环比</span><strong>{deltaLabel(growth(current.spSubsidy, previous.spSubsidy))}</strong><Change value={growth(current.spSubsidy, previous.spSubsidy)} /></div>
+                  <div><span>货架占比变化</span><strong>{Number.isFinite(previousShelfShare) ? `${((shelfShare - previousShelfShare) * 100).toFixed(1)}pp` : "历史不足"}</strong><span className="muted">当前 {percent(shelfShare)}</span></div>
                 </div>
               </section>
             </div>
@@ -348,20 +509,26 @@ export function SalesDashboard() {
           {view === "recent" && (
             <>
               <section className="period-grid">
-                <article className="period-card"><span>YESTERDAY · {asOf.slice(5)}</span><h2>昨日达成</h2><strong>{money(yesterday.total)}</strong><div className="period-breakdown"><i style={{ background: COLORS.tt }} />TT {money(yesterday.tt)}<i style={{ background: COLORS.sp }} />SP {money(yesterday.sp)}<i style={{ background: COLORS.lzd }} />LZD {money(yesterday.lzd)}</div></article>
-                <article className="period-card dark"><span>LAST 7 DAYS · {addDays(asOf, -6).slice(5)}—{asOf.slice(5)}</span><h2>过去7天达成</h2><strong>{money(last7.total)}</strong><div className="period-breakdown">较前7天 <Change value={growth(last7.total, prev7.total)} /> · 日均 {money(last7.total / 7)}</div></article>
+                <article className="period-card"><span>SELECTED DAY · {anchorDate.slice(5)}</span><h2>所选日达成</h2><strong>{money(yesterday.total)}</strong><div className="period-breakdown"><i style={{ background: COLORS.tt }} />TT {money(yesterday.tt)}<i style={{ background: COLORS.sp }} />SP {money(yesterday.sp)}<i style={{ background: COLORS.lzd }} />LZD {money(yesterday.lzd)}<Change value={growth(yesterday.total, priorDay.total)} /></div></article>
+                <article className="period-card dark"><span>LAST 7 DAYS · {addDays(anchorDate, -6).slice(5)}—{anchorDate.slice(5)}</span><h2>过去7天达成</h2><strong>{money(last7.total)}</strong><div className="period-breakdown">较前7天 <Change value={growth(last7.total, prev7.total)} /> · 日均 {money(last7.total / 7)}</div></article>
                 <article className="period-card subsidy"><span>PLATFORM SUBSIDY</span><h2>近7天平台补贴</h2><div className="split-number"><div><small>TikTok</small><strong>{money(last7.ttSubsidy)}</strong></div><div><small>Shopee</small><strong>{money(last7.spSubsidy)}</strong></div></div></article>
               </section>
               <section className="content-card chart-card">
-                <div className="section-heading"><div><span>DAILY SALES & SUBSIDY</span><h2>本月每日销售与补贴趋势</h2><p>柱：渠道销售额（左轴） · 线：平台补贴（右轴）</p></div><div className="chart-legend"><span><i style={{ background: COLORS.tt }} />TikTok销售</span><span><i style={{ background: COLORS.sp }} />Shopee销售</span><span><i style={{ background: COLORS.lzd }} />Lazada销售</span><span><i className="line-dot" style={{ background: COLORS.ttSub }} />TT补贴</span><span><i className="line-dot" style={{ background: COLORS.spSub }} />SP补贴</span></div></div>
+                <div className="section-heading"><div><span>DAILY SALES & SUBSIDY</span><h2>{trendMonth} 每日销售与补贴趋势</h2><p>柱：渠道销售额（左轴） · 线：平台补贴（右轴）</p></div><div className="chart-legend"><span><i style={{ background: COLORS.tt }} />TikTok销售</span><span><i style={{ background: COLORS.sp }} />Shopee销售</span><span><i style={{ background: COLORS.lzd }} />Lazada销售</span><span><i className="line-dot" style={{ background: COLORS.ttSub }} />TT补贴</span><span><i className="line-dot" style={{ background: COLORS.spSub }} />SP补贴</span></div></div>
                 <div className="canvas-wrap"><TrendCanvas data={daily} /></div>
               </section>
             </>
           )}
+
+          <section className="meeting-notes">
+            <div className="notes-heading"><div><span>MEETING NOTES</span><h2>会议小结与分析结论</h2><p>适合记录业务判断、待办事项和负责人；内容仅保存在当前浏览器。</p></div><div className="notes-status"><i />{notesStatus}</div></div>
+            <textarea aria-label="会议小结" value={meetingNotes} onChange={(event) => updateMeetingNotes(event.target.value)} placeholder="示例：&#10;1. 印尼 Glad2Glow 本期贡献最高，继续观察 TikTok 增量。&#10;2. SP 补贴率变化需要与销售增量一起复盘。&#10;3. 下周行动：负责人 / 截止时间 / 目标。" />
+            <div className="notes-actions"><button onClick={async () => { await navigator.clipboard.writeText(meetingNotes); setNotesStatus("已复制到剪贴板"); }}>复制小结</button><button className="ghost" onClick={() => updateMeetingNotes(analysis.map((item) => `【${item.tag}】${item.title}：${item.text}`).join("\n"))}>填入自动摘要</button></div>
+          </section>
         </>
       )}
 
-      <footer><span>SEA SALES · BUSINESS INSIGHTS</span><p>销售金额均为人民币；货架销售 = Shopee + Lazada；平台补贴按 TikTok 与 Shopee 分开统计。</p><a href="https://docs.google.com/spreadsheets/d/1McioJExoVC7Oy3rX2kXLQBEUEsYzW1o-oY_4nEtp2Ts/edit?gid=0#gid=0" target="_blank" rel="noreferrer">查看数据源 ↗</a></footer>
+      <footer><span>SEA SALES · BUSINESS INSIGHTS</span><p>销售金额均为人民币；货架销售 = Shopee + Lazada；平台补贴按 TikTok 与 Shopee 分开统计。</p><a href="https://docs.google.com/spreadsheets/d/1McioJExoVC7Oy3rX2kXLQBEUEsYzW1o-oY_4nEtp2Ts/edit?gid=0#gid=0" target="_blank" rel="noreferrer">查看数据源 →</a></footer>
     </main>
   );
 }

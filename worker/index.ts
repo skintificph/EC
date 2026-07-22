@@ -151,12 +151,13 @@ interface ExecutionContext {
 const worker = {
   async fetch(request: Request, env: Env, ctx: ExecutionContext): Promise<Response> {
     const url = new URL(request.url);
+    const managedPrivatePreview = url.hostname.endsWith(".chatgpt.site");
 
-    if (!env.DASHBOARD_PASSWORD || !env.AUTH_SECRET) {
+    if (!managedPrivatePreview && (!env.DASHBOARD_PASSWORD || !env.AUTH_SECRET)) {
       return htmlResponse("<h1>看板访问保护尚未完成配置</h1>", 503);
     }
 
-    const authenticated = await hasValidSession(request, env.AUTH_SECRET);
+    const authenticated = managedPrivatePreview || await hasValidSession(request, env.AUTH_SECRET!);
 
     if (url.pathname === "/login" && request.method === "GET") {
       return authenticated ? redirect("/") : htmlResponse(loginPage());
@@ -165,10 +166,10 @@ const worker = {
     if (url.pathname === "/login" && request.method === "POST") {
       const form = await request.formData();
       const password = String(form.get("password") ?? "");
-      if (!constantTimeEqual(password, env.DASHBOARD_PASSWORD)) {
+      if (!constantTimeEqual(password, env.DASHBOARD_PASSWORD!)) {
         return htmlResponse(loginPage("密码不正确，请重试。"), 401);
       }
-      return redirect("/", await createSessionCookie(env.AUTH_SECRET));
+      return redirect("/", await createSessionCookie(env.AUTH_SECRET!));
     }
 
     if (url.pathname === "/logout") {

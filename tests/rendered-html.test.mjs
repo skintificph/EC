@@ -66,7 +66,17 @@ test("server-renders the SEA sales dashboard", async () => {
   assert.match(html, /东南亚销售/);
   assert.match(html, /全渠道总览/);
   assert.match(html, /TikTok、Shopee、Lazada/);
+  assert.match(html, /筛选与时间/);
+  assert.match(html, /时间粒度/);
   assert.doesNotMatch(html, /codex-preview|Your site is taking shape|react-loading-skeleton/);
+});
+
+test("includes the meeting notes and automatic review modules", async () => {
+  const source = await readFile(new URL("../app/sales-dashboard.tsx", import.meta.url), "utf8");
+  assert.match(source, /数据刷新摘要/);
+  assert.match(source, /会议小结与分析结论/);
+  assert.match(source, /type="date"/);
+  assert.match(source, /type="month"/);
 });
 
 test("ships a complete SEA-sale fallback snapshot", async () => {
