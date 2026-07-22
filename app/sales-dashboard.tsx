@@ -160,6 +160,63 @@ function Change({ value, suffix = "%" }: { value: number; suffix?: string }) {
   );
 }
 
+function MultiSelect({
+  label,
+  allLabel,
+  options,
+  selected,
+  onChange,
+}: {
+  label: string;
+  allLabel: string;
+  options: string[];
+  selected: string[];
+  onChange: (items: string[]) => void;
+}) {
+  const allSelected = selected.length === 0;
+  const summary = allSelected
+    ? allLabel
+    : selected.length <= 2
+      ? selected.join("、")
+      : `${selected[0]} 等 ${selected.length} 项`;
+
+  const toggle = (option: string) => {
+    if (allSelected) {
+      const next = options.filter((item) => item !== option);
+      onChange(next.length === options.length ? [] : next);
+      return;
+    }
+    const next = selected.includes(option)
+      ? selected.filter((item) => item !== option)
+      : [...selected, option];
+    onChange(next.length === 0 || next.length === options.length ? [] : next);
+  };
+
+  return (
+    <div className="multi-select">
+      <span>{label}</span>
+      <details>
+        <summary><span>{summary}</span><i /></summary>
+        <div className="multi-menu">
+          <label className="select-all">
+            <input type="checkbox" checked={allSelected} onChange={() => onChange([])} />
+            <span>{allLabel}</span>
+          </label>
+          <div className="multi-options">
+            {options.map((option) => (
+              <label key={option}>
+                <input type="checkbox" checked={allSelected || selected.includes(option)} onChange={() => toggle(option)} />
+                <span>{option}</span>
+              </label>
+            ))}
+          </div>
+          <small>{allSelected ? `已选择全部 ${options.length} 项` : `已选择 ${selected.length} / ${options.length} 项`}</small>
+        </div>
+      </details>
+    </div>
+  );
+}
+
 function KpiCard({
   eyebrow,
   value,
@@ -291,8 +348,8 @@ function TrendCanvas({ data }: { data: Array<{ date: string } & Totals> }) {
 
 export function SalesDashboard() {
   const [rows, setRows] = useState<SaleRow[]>([]);
-  const [country, setCountry] = useState(ALL_COUNTRIES);
-  const [brand, setBrand] = useState(ALL_BRANDS);
+  const [selectedCountries, setSelectedCountries] = useState<string[]>([]);
+  const [selectedBrands, setSelectedBrands] = useState<string[]>([]);
   const [view, setView] = useState<View>("overview");
   const [timeMode, setTimeMode] = useState<TimeMode>("month");
   const [selectedStartDate, setSelectedStartDate] = useState("");
@@ -337,8 +394,17 @@ export function SalesDashboard() {
   const earliestDate = useMemo(() => rows.filter((r) => r.total > 0).reduce((min, r) => (!min || r.date < min ? r.date : min), ""), [rows]);
 
   const countries = useMemo(() => [...new Set(rows.map((r) => r.country))].sort(), [rows]);
-  const brands = useMemo(() => [...new Set(rows.filter((r) => country === ALL_COUNTRIES || r.country === country).map((r) => r.brand))].sort(), [rows, country]);
-  const filtered = useMemo(() => rows.filter((r) => (country === ALL_COUNTRIES || r.country === country) && (brand === ALL_BRANDS || r.brand === brand)), [rows, country, brand]);
+  const brands = useMemo(() => [...new Set(rows.filter((r) => !selectedCountries.length || selectedCountries.includes(r.country)).map((r) => r.brand))].sort(), [rows, selectedCountries]);
+  const filtered = useMemo(() => rows.filter((r) => (!selectedCountries.length || selectedCountries.includes(r.country)) && (!selectedBrands.length || selectedBrands.includes(r.brand))), [rows, selectedCountries, selectedBrands]);
+  const updateSelectedCountries = (items: string[]) => {
+    setSelectedCountries(items);
+    const availableBrands = [...new Set(rows.filter((r) => !items.length || items.includes(r.country)).map((r) => r.brand))];
+    setSelectedBrands((current) => {
+      if (!current.length) return current;
+      const available = current.filter((item) => availableBrands.includes(item));
+      return available.length === availableBrands.length ? [] : available;
+    });
+  };
   const effectiveStartDate = selectedStartDate || latestDate;
   const effectiveEndDate = selectedEndDate || latestDate;
   const effectiveMonth = selectedMonth || latestDate.slice(0, 7);
@@ -363,7 +429,7 @@ export function SalesDashboard() {
 
   const matrix = useMemo(() => {
     if (!selection) return [];
-    const scopedRows = rows.filter((r) => (country === ALL_COUNTRIES || r.country === country) && (brand === ALL_BRANDS || r.brand === brand));
+    const scopedRows = rows.filter((r) => (!selectedCountries.length || selectedCountries.includes(r.country)) && (!selectedBrands.length || selectedBrands.includes(r.brand)));
     const keys = [...new Set(scopedRows.map((r) => `${r.country}|${r.brand}`))];
     return keys.map((key) => {
       const [itemCountry, itemBrand] = key.split("|");
@@ -374,7 +440,7 @@ export function SalesDashboard() {
       const lastYear = sum(itemPeriods.yoy);
       return { country: itemCountry, brand: itemBrand, ...now, mom: growth(now.total, prev.total), yoy: growth(now.total, lastYear.total) };
     }).sort((a, b) => b.total - a.total);
-  }, [rows, timeMode, selection, sharedCutoff, rangeEnd, country, brand]);
+  }, [rows, timeMode, selection, sharedCutoff, rangeEnd, selectedCountries, selectedBrands]);
 
   const analysis = useMemo(() => {
     if (!periods || !matrix.length) return [];
@@ -430,7 +496,9 @@ export function SalesDashboard() {
   ];
 
   const comparisonLabels = timeMode === "day" ? ["所选区间", "上一等长周期", "去年同期"] : ["所选月", "上月同期", "去年同期"];
-  const scopeLabel = `${country === ALL_COUNTRIES ? "全国家" : country} · ${brand === ALL_BRANDS ? "全品牌" : brand}`;
+  const countryScope = selectedCountries.length ? (selectedCountries.length === 1 ? selectedCountries[0] : `${selectedCountries.length} 个国家`) : "全国家";
+  const brandScope = selectedBrands.length ? (selectedBrands.length === 1 ? selectedBrands[0] : `${selectedBrands.length} 个品牌`) : "全品牌";
+  const scopeLabel = `${countryScope} · ${brandScope}`;
 
   return (
     <main>
@@ -448,8 +516,8 @@ export function SalesDashboard() {
 
       <section className="filter-panel">
         <div className="filter-copy"><span>VIEW CONTROL</span><h2>筛选与时间</h2><p>所有指标、图表和自动摘要同步更新</p></div>
-        <label>国家<select value={country} onChange={(event) => { setCountry(event.target.value); setBrand(ALL_BRANDS); }}><option>{ALL_COUNTRIES}</option>{countries.map((item) => <option key={item}>{item}</option>)}</select></label>
-        <label>品牌<select value={brand} onChange={(event) => setBrand(event.target.value)}><option>{ALL_BRANDS}</option>{brands.map((item) => <option key={item}>{item}</option>)}</select></label>
+        <MultiSelect label="国家" allLabel={ALL_COUNTRIES} options={countries} selected={selectedCountries} onChange={updateSelectedCountries} />
+        <MultiSelect label="品牌" allLabel={ALL_BRANDS} options={brands} selected={selectedBrands} onChange={setSelectedBrands} />
         <div className="time-control">
           <span>时间粒度</span>
           <div className="time-toggle" aria-label="时间粒度">

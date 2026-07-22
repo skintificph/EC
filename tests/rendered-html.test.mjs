@@ -80,6 +80,10 @@ test("includes the meeting notes and automatic review modules", async () => {
   assert.match(source, /开始日期/);
   assert.match(source, /结束日期/);
   assert.match(source, /上一等长周期/);
+  assert.match(source, /function MultiSelect/);
+  assert.match(source, /type="checkbox"/);
+  assert.match(source, /selectedCountries/);
+  assert.match(source, /selectedBrands/);
   assert.match(source, /type="date"/);
   assert.match(source, /type="month"/);
 });

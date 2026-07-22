@@ -58,9 +58,24 @@ main { width: min(1760px, calc(100% - 56px)); margin: 0 auto; padding: 48px 0 30
 .filter-panel { display: grid; grid-template-columns: 1.05fr .7fr .7fr 1.85fr .9fr; gap: 20px; align-items: end; padding: 28px 30px; margin-bottom: 24px; background: var(--card); border: 1px solid rgba(255,255,255,.92); border-radius: 30px; box-shadow: var(--shadow); }
 .filter-copy h2, .section-heading h2, .notes-heading h2 { margin: 6px 0 5px; font-size: 30px; letter-spacing: -.04em; }
 .filter-copy p, .section-heading p, .notes-heading p { margin: 0; color: var(--muted); font-size: 15px; line-height: 1.55; }
-.filter-panel label, .time-control { display: grid; gap: 10px; color: var(--muted); font-size: 14px; font-weight: 750; }
+.filter-panel > label, .time-control, .multi-select { display: grid; gap: 10px; color: var(--muted); font-size: 14px; font-weight: 750; }
 .filter-panel select, .time-control input { width: 100%; min-height: 56px; color: var(--ink); border: 1px solid var(--line); border-radius: 16px; background-color: #f8fbfc; padding: 0 16px; cursor: pointer; }
 .filter-panel select { appearance: none; padding-right: 44px; background-image: linear-gradient(45deg,transparent 50%,#657887 50%),linear-gradient(135deg,#657887 50%,transparent 50%); background-position: calc(100% - 20px) 25px,calc(100% - 14px) 25px; background-size: 6px 6px; background-repeat: no-repeat; }
+.multi-select { min-width: 0; }
+.multi-select details { position: relative; min-width: 0; }
+.multi-select summary { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 56px; padding: 0 16px; overflow: hidden; color: var(--ink); border: 1px solid var(--line); border-radius: 16px; background: #f8fbfc; cursor: pointer; list-style: none; }
+.multi-select summary::-webkit-details-marker { display: none; }
+.multi-select summary > span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.multi-select summary > i { flex: 0 0 auto; width: 9px; height: 9px; margin: -5px 3px 0 0; border-right: 2px solid #657887; border-bottom: 2px solid #657887; transform: rotate(45deg); transition: transform .18s ease; }
+.multi-select details[open] summary { border-color: #7f98aa; box-shadow: 0 0 0 4px rgba(127,152,170,.12); }
+.multi-select details[open] summary > i { margin-top: 4px; transform: rotate(225deg); }
+.multi-menu { position: absolute; z-index: 30; top: calc(100% + 9px); left: 0; width: max(100%, 250px); padding: 10px; color: var(--ink); border: 1px solid var(--line); border-radius: 18px; background: rgba(249,252,253,.98); box-shadow: 0 18px 45px rgba(49,68,83,.2); backdrop-filter: blur(18px); }
+.multi-menu label { display: flex; align-items: center; gap: 11px; min-height: 43px; padding: 8px 10px; border-radius: 11px; cursor: pointer; }
+.multi-menu label:hover { background: var(--mist); }
+.multi-menu .select-all { margin-bottom: 6px; border-bottom: 1px solid var(--line); border-radius: 11px 11px 5px 5px; font-weight: 850; }
+.multi-menu input { width: 18px; height: 18px; margin: 0; accent-color: var(--blue); }
+.multi-menu small { display: block; padding: 9px 10px 3px; color: var(--muted); font-size: 12px; font-weight: 650; }
+.multi-options { max-height: 245px; overflow-y: auto; overscroll-behavior: contain; }
 .time-control { grid-template-columns: auto 1fr; align-items: end; }
 .time-control > span { grid-column: 1 / -1; }
 .time-toggle { display: flex; align-self: stretch; padding: 4px; border-radius: 15px; background: #e6f0f3; }
