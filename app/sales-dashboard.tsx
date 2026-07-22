@@ -56,6 +56,11 @@ function money(value: number, compact = true) {
   return `¥${Math.round(value).toLocaleString("zh-CN")}`;
 }
 
+function signedMoney(value: number) {
+  if (!Number.isFinite(value)) return "—";
+  return `${value > 0 ? "+" : value < 0 ? "−" : ""}${money(Math.abs(value), false)}`;
+}
+
 function percent(value: number) {
   return Number.isFinite(value) ? `${(value * 100).toFixed(1)}%` : "—";
 }
@@ -438,9 +443,50 @@ export function SalesDashboard() {
       const now = sum(itemPeriods.current);
       const prev = sum(itemPeriods.previous);
       const lastYear = sum(itemPeriods.yoy);
-      return { country: itemCountry, brand: itemBrand, ...now, mom: growth(now.total, prev.total), yoy: growth(now.total, lastYear.total) };
+      return {
+        country: itemCountry,
+        brand: itemBrand,
+        ...now,
+        mom: growth(now.total, prev.total),
+        yoy: growth(now.total, lastYear.total),
+        delta: now.total - prev.total,
+        ttDelta: now.tt - prev.tt,
+        spDelta: now.sp - prev.sp,
+        lzdDelta: now.lzd - prev.lzd,
+        ttSubsidyDelta: now.ttSubsidy - prev.ttSubsidy,
+        spSubsidyDelta: now.spSubsidy - prev.spSubsidy,
+      };
     }).sort((a, b) => b.total - a.total);
   }, [rows, timeMode, selection, sharedCutoff, rangeEnd, selectedCountries, selectedBrands]);
+
+  const reviewData = useMemo(() => {
+    const topGrowth = matrix.filter((item) => item.delta > 0).sort((a, b) => b.delta - a.delta).slice(0, 5);
+    const topDecline = matrix.filter((item) => item.delta < 0).sort((a, b) => a.delta - b.delta).slice(0, 5);
+    const movers = [...topGrowth, ...topDecline];
+
+    const dimensionTrends = (key: "brand" | "country") => {
+      const groups = new Map<string, (typeof matrix)[number][]>();
+      matrix.forEach((item) => groups.set(item[key], [...(groups.get(item[key]) ?? []), item]));
+      return [...groups.entries()].map(([name, items]) => {
+        const ranked = [...items].sort((a, b) => b.delta - a.delta);
+        return {
+          name,
+          total: items.reduce((value, item) => value + item.total, 0),
+          delta: items.reduce((value, item) => value + item.delta, 0),
+          best: ranked[0],
+          weakest: ranked.at(-1)!,
+        };
+      }).sort((a, b) => b.delta - a.delta);
+    };
+
+    return {
+      topGrowth,
+      topDecline,
+      movers,
+      brandTrends: dimensionTrends("brand"),
+      countryTrends: dimensionTrends("country"),
+    };
+  }, [matrix]);
 
   const analysis = useMemo(() => {
     if (!periods || !matrix.length) return [];
@@ -555,6 +601,69 @@ export function SalesDashboard() {
             <div className="section-heading"><div><span>AUTO REVIEW</span><h2>数据刷新摘要</h2><p>根据当前国家、品牌和时间范围自动生成</p></div><div className="analysis-badge"><i />已同步</div></div>
             <div className="insight-strip">
               {analysis.map((item) => <article className={`auto-insight ${item.tone}`} key={item.tag}><span>{item.tag}</span><strong>{item.title}</strong><p>{item.text}</p></article>)}
+            </div>
+
+            <div className="review-section-heading">
+              <div><span>COUNTRY × BRAND MOVERS</span><h3>国家品牌增长与下滑 TOP5</h3></div>
+              <small>按较上一对比周期的销售金额变化排序</small>
+            </div>
+            <div className="review-rankings">
+              <article className="review-panel growth-panel">
+                <header><div><i />增长最多</div><strong>TOP 5</strong></header>
+                <ol>
+                  {reviewData.topGrowth.map((item, index) => (
+                    <li key={`${item.country}-${item.brand}`}><b>{index + 1}</b><div><strong>{item.brand}</strong><span>{item.country} · 环比 {deltaLabel(item.mom)}</span></div><em>{signedMoney(item.delta)}</em></li>
+                  ))}
+                  {!reviewData.topGrowth.length && <li className="empty-review">当前筛选范围暂无增长组合</li>}
+                </ol>
+              </article>
+              <article className="review-panel decline-panel">
+                <header><div><i />下滑最多</div><strong>TOP 5</strong></header>
+                <ol>
+                  {reviewData.topDecline.map((item, index) => (
+                    <li key={`${item.country}-${item.brand}`}><b>{index + 1}</b><div><strong>{item.brand}</strong><span>{item.country} · 环比 {deltaLabel(item.mom)}</span></div><em>{signedMoney(item.delta)}</em></li>
+                  ))}
+                  {!reviewData.topDecline.length && <li className="empty-review">当前筛选范围暂无下滑组合</li>}
+                </ol>
+              </article>
+            </div>
+
+            <article className="review-panel movement-panel">
+              <header><div><i />重点组合拆解</div><strong>渠道趋势与补贴变化</strong></header>
+              <div className="review-table">
+                <table>
+                  <thead><tr><th>国家 / 品牌</th><th>销售变化</th><th>环比</th><th>TikTok</th><th>Shopee</th><th>Lazada</th><th>TT 补贴</th><th>SP 补贴</th></tr></thead>
+                  <tbody>
+                    {reviewData.movers.map((item) => (
+                      <tr key={`${item.country}-${item.brand}`}>
+                        <td><b>{item.brand}</b><span>{item.country}</span></td>
+                        <td><strong className={item.delta >= 0 ? "review-up" : "review-down"}>{signedMoney(item.delta)}</strong></td>
+                        <td>{deltaLabel(item.mom)}</td>
+                        <td className={item.ttDelta >= 0 ? "review-up" : "review-down"}>{signedMoney(item.ttDelta)}</td>
+                        <td className={item.spDelta >= 0 ? "review-up" : "review-down"}>{signedMoney(item.spDelta)}</td>
+                        <td className={item.lzdDelta >= 0 ? "review-up" : "review-down"}>{signedMoney(item.lzdDelta)}</td>
+                        <td className={item.ttSubsidyDelta >= 0 ? "review-up" : "review-down"}>{signedMoney(item.ttSubsidyDelta)}</td>
+                        <td className={item.spSubsidyDelta >= 0 ? "review-up" : "review-down"}>{signedMoney(item.spSubsidyDelta)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </article>
+
+            <div className="dimension-review-grid">
+              <article className="review-panel dimension-panel">
+                <header><div><i />品牌维度</div><strong>各品牌在不同国家的趋势</strong></header>
+                <div className="dimension-list">
+                  {reviewData.brandTrends.map((item) => <div className="dimension-row" key={item.name}><div><strong>{item.name}</strong><span>当前销售 {money(item.total)}</span></div><em className={item.delta >= 0 ? "review-up" : "review-down"}>{signedMoney(item.delta)}</em><p><span>增长最好</span><b>{item.best.country} {signedMoney(item.best.delta)}</b><span>相对承压</span><b>{item.weakest.country} {signedMoney(item.weakest.delta)}</b></p></div>)}
+                </div>
+              </article>
+              <article className="review-panel dimension-panel">
+                <header><div><i />国家维度</div><strong>各国家站点内品牌趋势</strong></header>
+                <div className="dimension-list">
+                  {reviewData.countryTrends.map((item) => <div className="dimension-row" key={item.name}><div><strong>{item.name}</strong><span>当前销售 {money(item.total)}</span></div><em className={item.delta >= 0 ? "review-up" : "review-down"}>{signedMoney(item.delta)}</em><p><span>增长最好</span><b>{item.best.brand} {signedMoney(item.best.delta)}</b><span>相对承压</span><b>{item.weakest.brand} {signedMoney(item.weakest.delta)}</b></p></div>)}
+                </div>
+              </article>
             </div>
           </section>
 

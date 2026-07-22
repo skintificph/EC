@@ -84,6 +84,10 @@ test("includes the meeting notes and automatic review modules", async () => {
   assert.match(source, /type="checkbox"/);
   assert.match(source, /selectedCountries/);
   assert.match(source, /selectedBrands/);
+  assert.match(source, /国家品牌增长与下滑 TOP5/);
+  assert.match(source, /渠道趋势与补贴变化/);
+  assert.match(source, /各品牌在不同国家的趋势/);
+  assert.match(source, /各国家站点内品牌趋势/);
   assert.match(source, /type="date"/);
   assert.match(source, /type="month"/);
 });
